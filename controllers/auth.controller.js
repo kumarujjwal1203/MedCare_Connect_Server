@@ -269,7 +269,11 @@ export const googleCallback = async (req, res) => {
         allergies: [],
         chronicConditions: [],
       });
-      await AIMemory.create({ userId: user._id });
+      await AIMemory.updateOne(
+        { userId: user._id },
+        { $setOnInsert: { userId: user._id } },
+        { upsert: true }
+      );
     }
 
     if (!user.googleId) {
@@ -340,7 +344,11 @@ export const googleOAuth = async (req, res) => {
         allergies: [],
         chronicConditions: [],
       });
-      await AIMemory.create({ userId: user._id });
+      await AIMemory.updateOne(
+        { userId: user._id },
+        { $setOnInsert: { userId: user._id } },
+        { upsert: true }
+      );
     }
 
     if (!user.googleId) {

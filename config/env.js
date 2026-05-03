@@ -44,14 +44,17 @@ const configuredClientUrls = getEnv("CLIENT_URLS")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+const clientUrls = Array.from(
+  new Set([...defaultClientUrls, ...configuredClientUrls])
+);
+
 export const env = {
   nodeEnv: getEnv("NODE_ENV", "development"),
   port: Number(getEnv("PORT", "5000")) || 5000,
   mongoUri: getEnv("MONGO_URI"),
   jwtSecret: jwtSecret || fallbackJwtSecret,
   jwtRefreshSecret: jwtRefreshSecret || fallbackJwtRefreshSecret,
-  clientUrls:
-    configuredClientUrls.length > 0 ? configuredClientUrls : defaultClientUrls,
+  clientUrls,
   geminiApiKey: getEnv("GEMINI_API_KEY"),
   openAiApiKey: getEnv("OPENAI_KEY"),
   huggingFaceApiKey: getEnv("HUGGING_FACE_API_KEY"),

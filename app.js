@@ -22,6 +22,14 @@ import { sanitizeInput } from "./middleware/security.middleware.js";
 const app = express();
 
 const allowedOrigins = new Set(env.clientUrls);
+const isAllowedVercelOrigin = (origin) => {
+  try {
+    const { protocol, hostname } = new URL(origin);
+    return protocol === "https:" && hostname.endsWith(".vercel.app");
+  } catch {
+    return false;
+  }
+};
 
 app.use(
   helmet({
@@ -47,7 +55,7 @@ app.use(
         return callback(null, true);
       }
 
-      if (allowedOrigins.has(origin)) {
+      if (allowedOrigins.has(origin) || isAllowedVercelOrigin(origin)) {
         return callback(null, true);
       }
 
