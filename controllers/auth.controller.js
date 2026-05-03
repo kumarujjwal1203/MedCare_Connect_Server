@@ -305,21 +305,29 @@ export const googleOAuth = async (req, res) => {
     }
 
     let payload;
+    const firebasePayload = firebaseUser?.email
+      ? {
+          sub: firebaseUser.uid || firebaseIdToken || firebaseUser.email,
+          name: firebaseUser.name || firebaseUser.email.split("@")[0],
+          email: firebaseUser.email,
+          picture: firebaseUser.photoURL || "",
+          email_verified: firebaseUser.emailVerified !== false,
+        }
+      : null;
 
     if (process.env.GOOGLE_CLIENT_ID && idToken) {
-      const ticket = await googleClient.verifyIdToken({
-        idToken,
-        audience: process.env.GOOGLE_CLIENT_ID,
-      });
-      payload = ticket.getPayload();
-    } else if (firebaseUser?.email) {
-      payload = {
-        sub: firebaseUser.uid || firebaseIdToken || firebaseUser.email,
-        name: firebaseUser.name || firebaseUser.email.split("@")[0],
-        email: firebaseUser.email,
-        picture: firebaseUser.photoURL || "",
-        email_verified: firebaseUser.emailVerified !== false,
-      };
+      try {
+        const ticket = await googleClient.verifyIdToken({
+          idToken,
+          audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        payload = ticket.getPayload();
+      } catch (verifyError) {
+        console.warn("Google token verification failed, using Firebase user payload:", verifyError.message);
+        payload = firebasePayload;
+      }
+    } else {
+      payload = firebasePayload;
     }
 
     if (!payload?.email_verified || !payload?.email) {

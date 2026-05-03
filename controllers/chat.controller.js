@@ -202,7 +202,12 @@ export const chatWithAI = async (req, res) => {
       });
     }
 
-    const memory = await getAIMemory(req.user.id) || {};
+    let memory = {};
+    try {
+      memory = await getAIMemory(req.user.id) || {};
+    } catch (memoryError) {
+      console.warn("AI memory lookup failed:", memoryError.message);
+    }
 
     const prompt = healthPrompt(user, memory, message);
 
@@ -217,11 +222,15 @@ export const chatWithAI = async (req, res) => {
       aiResponse = fallback.aiResponse;
     }
 
-    await ChatHistory.create({
-      userId: req.user.id,
-      userMessage: message,
-      aiResponse
-    });
+    try {
+      await ChatHistory.create({
+        userId: req.user.id,
+        userMessage: message,
+        aiResponse
+      });
+    } catch (historyError) {
+      console.warn("Chat history save failed:", historyError.message);
+    }
 
     const extractedData = fallback?.extractedData || extractHealthData(message, aiResponse);
 
@@ -241,26 +250,34 @@ export const chatWithAI = async (req, res) => {
     if (extractedData.symptoms.length > 0 || extractedData.diagnoses.length > 0) {
       const riskPatterns = detectRiskPatterns(memory, extractedData);
 
-      await updateAIMemory(req.user.id, {
-        frequentSymptoms: extractedData.symptoms,
-        pastDiagnoses: extractedData.diagnoses,
-        medicationsHistory: extractedData.medications,
-        riskPatterns
-      });
+      try {
+        await updateAIMemory(req.user.id, {
+          frequentSymptoms: extractedData.symptoms,
+          pastDiagnoses: extractedData.diagnoses,
+          medicationsHistory: extractedData.medications,
+          riskPatterns
+        });
+      } catch (memoryUpdateError) {
+        console.warn("AI memory update failed:", memoryUpdateError.message);
+      }
     }
 
     if (extractedData.diagnoses.length > 0) {
-      await HealthRecord.create({
-        userId: req.user.id,
-        source: "chat",
-        symptoms: extractedData.symptoms,
-        diagnosis: extractedData.diagnoses.join(", "),
-        medicines: extractedData.medications.map((m) => ({
-          name: m,
-          dosage: "As recommended",
-          duration: "Consult doctor"
-        }))
-      });
+      try {
+        await HealthRecord.create({
+          userId: req.user.id,
+          source: "chat",
+          symptoms: extractedData.symptoms,
+          diagnosis: extractedData.diagnoses.join(", "),
+          medicines: extractedData.medications.map((m) => ({
+            name: m,
+            dosage: "As recommended",
+            duration: "Consult doctor"
+          }))
+        });
+      } catch (recordError) {
+        console.warn("Health record save failed:", recordError.message);
+      }
     }
 
     const reasoning = fallback
