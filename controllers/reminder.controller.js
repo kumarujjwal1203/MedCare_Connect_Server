@@ -8,12 +8,17 @@ export const createReminder = async (req, res) => {
       return res.status(400).json({ message: "Title and scheduled date are required" });
     }
 
+    const parsedDate = new Date(scheduledDate);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return res.status(400).json({ message: "Scheduled date is invalid" });
+    }
+
     const reminder = await Reminder.create({
       userId: req.user.id,
       type: type || "general",
       title,
       description,
-      scheduledDate: new Date(scheduledDate),
+      scheduledDate: parsedDate,
       recurring: recurring || { enabled: false }
     });
 
@@ -30,7 +35,6 @@ export const getReminders = async (req, res) => {
 
     if (upcoming === "true") {
       query.isCompleted = false;
-      query.scheduledDate = { $gte: new Date() };
     } else if (completed === "true") {
       query.isCompleted = true;
     }
@@ -62,6 +66,11 @@ export const getReminderById = async (req, res) => {
 export const updateReminder = async (req, res) => {
   try {
     const { type, title, description, scheduledDate, isCompleted, recurring } = req.body;
+    const parsedDate = scheduledDate ? new Date(scheduledDate) : null;
+
+    if (parsedDate && Number.isNaN(parsedDate.getTime())) {
+      return res.status(400).json({ message: "Scheduled date is invalid" });
+    }
 
     const reminder = await Reminder.findOneAndUpdate(
       { _id: req.params.id, userId: req.user.id },
@@ -69,7 +78,7 @@ export const updateReminder = async (req, res) => {
         ...(type && { type }),
         ...(title && { title }),
         ...(description !== undefined && { description }),
-        ...(scheduledDate && { scheduledDate: new Date(scheduledDate) }),
+        ...(parsedDate && { scheduledDate: parsedDate }),
         ...(isCompleted !== undefined && { isCompleted }),
         ...(recurring && { recurring })
       },
