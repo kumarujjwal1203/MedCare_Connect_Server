@@ -10,10 +10,11 @@ import {
 
 const router = Router();
 
-router.use(authMiddleware);
-
 router.get("/nearby", getNearbyPharmacies);
 router.get("/details/:placeId", getPharmacyDetails);
+
+router.use(authMiddleware);
+
 router.post("/request", sendMedicineRequest);
 router.get("/requests", getMyRequests);
 router.delete("/requests/:id", deleteRequest);

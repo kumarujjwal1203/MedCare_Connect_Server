@@ -42,6 +42,7 @@ const sendAuthPayload = (res, user, accessToken, refreshToken) => {
   setRefreshCookie(res, refreshToken);
   return res.json({
     token: accessToken,
+    refreshToken,
     user: {
       _id: user._id,
       id: user._id,
@@ -182,7 +183,7 @@ export const refreshToken = async (req, res) => {
     await user.save();
 
     setRefreshCookie(res, newRefreshToken);
-    return res.json({ token: newAccessToken });
+    return res.json({ token: newAccessToken, refreshToken: newRefreshToken });
   } catch (error) {
     console.error(error.message);
     return res
@@ -193,7 +194,7 @@ export const refreshToken = async (req, res) => {
 
 export const logoutUser = async (req, res) => {
   try {
-    const token = req.cookies?.refreshToken;
+    const token = req.cookies?.refreshToken ?? req.body?.refreshToken;
     if (token) {
       try {
         const decoded = jwt.decode(token);
