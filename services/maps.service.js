@@ -1,4 +1,5 @@
-const PLACES_BASE = "https://maps.googleapis.com/maps/api/place";
+const PLACES_NEW_BASE = "https://places.googleapis.com/v1";
+const GEOCODE_BASE = "https://maps.googleapis.com/maps/api/geocode/json";
 const OVERPASS_URLS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -18,47 +19,30 @@ const mapsKey = () => {
 const hasGoogleMapsKey = () => Boolean(mapsKey());
 
 /**
- * Find pharmacies near a coordinate using Google Maps Places Nearby Search.
+ * Find pharmacies near a coordinate using Google Places API (New), with
+ * OpenStreetMap fallback when Google is not configured or rejects the request.
  */
 export const findNearbyPharmacies = async (lat, lng, radiusMeters = 5000) => {
   if (!hasGoogleMapsKey()) {
     return findNearbyPharmaciesWithOpenStreetMap(lat, lng, radiusMeters);
   }
 
-  const params = new URLSearchParams({
-    location: `${lat},${lng}`,
-    radius: radiusMeters,
-    type: "pharmacy",
-    key: mapsKey(),
-  });
-
-  const res = await fetch(`${PLACES_BASE}/nearbysearch/json?${params}`);
-  const data = await res.json();
-
-  if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
-    throw new Error(`Google Places API error: ${data.status} — ${data.error_message || "unknown"}`);
+  try {
+    return await findNearbyPharmaciesWithGooglePlacesNew(lat, lng, radiusMeters);
+  } catch (error) {
+    console.warn(
+      "Google Places API unavailable; falling back to OpenStreetMap:",
+      error.message
+    );
+    return findNearbyPharmaciesWithOpenStreetMap(lat, lng, radiusMeters);
   }
-
-  return (data.results || []).map((p) => ({
-    placeId: p.place_id,
-    name: p.name,
-    address: p.vicinity || "",
-    rating: p.rating ?? null,
-    totalRatings: p.user_ratings_total ?? 0,
-    isOpen: p.opening_hours?.open_now ?? null,
-    location: {
-      lat: p.geometry.location.lat,
-      lng: p.geometry.location.lng,
-    },
-    distance: haversineKm(lat, lng, p.geometry.location.lat, p.geometry.location.lng),
-  })).sort((a, b) => a.distance - b.distance);
 };
 
 /**
  * Get detailed info (phone, website) for a specific place.
  */
 export const getPlaceDetails = async (placeId) => {
-  if (!hasGoogleMapsKey()) {
+  if (!hasGoogleMapsKey() || placeId?.startsWith("osm-")) {
     return {
       placeId,
       name: "Pharmacy",
@@ -70,27 +54,46 @@ export const getPlaceDetails = async (placeId) => {
     };
   }
 
-  const params = new URLSearchParams({
-    place_id: placeId,
-    fields: "name,formatted_address,formatted_phone_number,website,opening_hours",
-    key: mapsKey(),
-  });
+  try {
+    const res = await fetch(`${PLACES_NEW_BASE}/places/${encodeURIComponent(placeId)}`, {
+      headers: {
+        "X-Goog-Api-Key": mapsKey(),
+        "X-Goog-FieldMask": [
+          "id",
+          "displayName",
+          "formattedAddress",
+          "nationalPhoneNumber",
+          "internationalPhoneNumber",
+          "websiteUri",
+          "currentOpeningHours.openNow",
+          "currentOpeningHours.weekdayDescriptions",
+        ].join(","),
+      },
+    });
 
-  const res = await fetch(`${PLACES_BASE}/details/json?${params}`);
-  const data = await res.json();
+    const data = await parseGoogleJsonResponse(res, "Google Place details");
 
-  if (data.status !== "OK") {
-    throw new Error(`Place details error: ${data.status}`);
+    return {
+      placeId: data.id || placeId,
+      name: data.displayName?.text || "Pharmacy",
+      address: data.formattedAddress || "",
+      phone: data.nationalPhoneNumber || data.internationalPhoneNumber || null,
+      website: data.websiteUri || null,
+      openNow: data.currentOpeningHours?.openNow ?? null,
+      hours: data.currentOpeningHours?.weekdayDescriptions || [],
+    };
+  } catch (error) {
+    console.warn("Google Place details unavailable:", error.message);
+    return {
+      placeId,
+      name: "Pharmacy",
+      address: "",
+      phone: null,
+      website: null,
+      openNow: null,
+      hours: [],
+    };
   }
-
-  return {
-    name: data.result.name,
-    address: data.result.formatted_address,
-    phone: data.result.formatted_phone_number || null,
-    website: data.result.website || null,
-    openNow: data.result.opening_hours?.open_now ?? null,
-    hours: data.result.opening_hours?.weekday_text || [],
-  };
 };
 
 /**
@@ -101,16 +104,96 @@ export const reverseGeocode = async (lat, lng) => {
     return reverseGeocodeWithOpenStreetMap(lat, lng);
   }
 
-  const params = new URLSearchParams({
-    latlng: `${lat},${lng}`,
-    key: mapsKey(),
+  try {
+    const params = new URLSearchParams({
+      latlng: `${lat},${lng}`,
+      key: mapsKey(),
+    });
+
+    const res = await fetch(`${GEOCODE_BASE}?${params}`);
+    const data = await res.json();
+
+    if (data.status !== "OK" || !data.results?.length) {
+      return reverseGeocodeWithOpenStreetMap(lat, lng);
+    }
+
+    return data.results[0].formatted_address;
+  } catch {
+    return reverseGeocodeWithOpenStreetMap(lat, lng);
+  }
+};
+
+const findNearbyPharmaciesWithGooglePlacesNew = async (lat, lng, radiusMeters = 5000) => {
+  const safeRadius = Math.min(Math.max(Number(radiusMeters) || 5000, 500), 10000);
+  const response = await fetch(`${PLACES_NEW_BASE}/places:searchNearby`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": mapsKey(),
+      "X-Goog-FieldMask": [
+        "places.id",
+        "places.displayName",
+        "places.formattedAddress",
+        "places.rating",
+        "places.userRatingCount",
+        "places.currentOpeningHours.openNow",
+        "places.location",
+      ].join(","),
+    },
+    body: JSON.stringify({
+      includedTypes: ["pharmacy"],
+      maxResultCount: 20,
+      rankPreference: "DISTANCE",
+      locationRestriction: {
+        circle: {
+          center: {
+            latitude: Number(lat),
+            longitude: Number(lng),
+          },
+          radius: safeRadius,
+        },
+      },
+    }),
   });
 
-  const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`);
-  const data = await res.json();
+  const data = await parseGoogleJsonResponse(response, "Google Places API");
 
-  if (data.status !== "OK" || !data.results?.length) return "";
-  return data.results[0].formatted_address;
+  return (data.places || [])
+    .map((place) => {
+      const itemLat = place.location?.latitude;
+      const itemLng = place.location?.longitude;
+      if (!itemLat || !itemLng) {
+        return null;
+      }
+
+      return {
+        placeId: place.id,
+        source: "google_places_new",
+        confidence: "google_verified",
+        name: place.displayName?.text || "Pharmacy",
+        address: place.formattedAddress || "Address not available",
+        rating: place.rating ?? null,
+        totalRatings: place.userRatingCount ?? 0,
+        isOpen: place.currentOpeningHours?.openNow ?? null,
+        location: {
+          lat: itemLat,
+          lng: itemLng,
+        },
+        distance: haversineKm(lat, lng, itemLat, itemLng),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.distance - b.distance);
+};
+
+const parseGoogleJsonResponse = async (response, label) => {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const status = data.error?.status || response.status;
+    const message = data.error?.message || response.statusText || "unknown";
+    throw new Error(`${label} error: ${status} - ${message}`);
+  }
+  return data;
 };
 
 // Haversine formula — straight-line km between two coordinates
