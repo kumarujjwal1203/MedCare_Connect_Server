@@ -23,7 +23,9 @@ export const getDoctors = async (req, res) => {
       query.$or = [
         { name: new RegExp(search, "i") },
         { specialization: new RegExp(search, "i") },
-        { hospital: new RegExp(search, "i") }
+        { hospital: new RegExp(search, "i") },
+        { "location.city": new RegExp(search, "i") },
+        { "location.state": new RegExp(search, "i") }
       ];
     }
 
